@@ -4,6 +4,7 @@ import { Mail, Lock, User, AlertCircle, ArrowRight } from 'lucide-react';
 import { register } from '../api/auth.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Toast } from '../components/Toast.jsx';
+import { GoogleSignInButton } from '../components/GoogleSignInButton.jsx';
 
 export const Register = () => {
   const [formData, setFormData] = useState({
@@ -225,7 +226,21 @@ export const Register = () => {
           </button>
         </form>
 
-        <div className="w-full h-px bg-white/10 my-8"></div>
+        <div className="flex items-center gap-3 my-6">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-white/40 text-xs uppercase tracking-wider">или</span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+
+        <GoogleSignInButton onError={(msg) => setToast({ message: msg, type: 'error' })} />
+
+        <p className="text-center text-white/40 text-[11px] mt-5 leading-relaxed">
+          Создавая аккаунт, вы соглашаетесь с{' '}
+          <Link to="/terms" className="text-white/70 hover:text-white">Условиями</Link>{' '}и{' '}
+          <Link to="/privacy" className="text-white/70 hover:text-white">Политикой конфиденциальности</Link>.
+        </p>
+
+        <div className="w-full h-px bg-white/10 my-6"></div>
 
         {/* Ссылка на вход */}
         <p className="text-center text-white/50 text-sm font-medium">

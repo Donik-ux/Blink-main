@@ -4,6 +4,7 @@ import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
 import { login } from '../api/auth.js';
 import { useAuthStore } from '../store/authStore.js';
 import { Toast } from '../components/Toast.jsx';
+import { GoogleSignInButton } from '../components/GoogleSignInButton.jsx';
 
 export const Login = () => {
   const [formData, setFormData] = useState({
@@ -145,9 +146,9 @@ export const Login = () => {
           </div>
 
           <div className="w-full flex justify-end">
-            <button type="button" className="text-white/50 text-xs font-medium hover:text-white transition-colors">
+            <Link to="/forgot-password" className="text-white/50 text-xs font-medium hover:text-white transition-colors">
               Забыл пароль?
-            </button>
+            </Link>
           </div>
 
           {/* Кнопка входа */}
@@ -164,7 +165,15 @@ export const Login = () => {
           </button>
         </form>
 
-        <div className="w-full h-px bg-white/10 my-8"></div>
+        <div className="flex items-center gap-3 my-6">
+          <div className="flex-1 h-px bg-white/10" />
+          <span className="text-white/40 text-xs uppercase tracking-wider">или</span>
+          <div className="flex-1 h-px bg-white/10" />
+        </div>
+
+        <GoogleSignInButton onError={(msg) => setToast({ message: msg, type: 'error' })} />
+
+        <div className="w-full h-px bg-white/10 my-6"></div>
 
         <p className="text-center text-white/50 text-sm font-medium">
           Новый пользователь?{' '}

@@ -1,9 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
-import { MapPin, Ghost, Navigation } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap } from 'react-leaflet';
+import { MapPin, Ghost, Navigation, Route, Flame, Shield, Pin, Footprints } from 'lucide-react';
 import { getFriends } from '../api/friends.js';
 import { createConversation } from '../api/chat.js';
+import { getGeofences } from '../api/geofences.js';
+import { getHistory, getHeatmap } from '../api/history.js';
+import { createCheckin } from '../api/checkins.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useLocationStore } from '../store/locationStore.js';
 import { useFriendStore } from '../store/friendStore.js';
@@ -14,11 +17,14 @@ import { BottomNav } from '../components/BottomNav.jsx';
 import { FriendPopup } from '../components/FriendPopup.jsx';
 import { Toast } from '../components/Toast.jsx';
 import { createFriendMarker, createMyMarker } from '../components/FriendPin.jsx';
+import { LiveShareButton } from '../components/LiveShareButton.jsx';
+import { getProfile, setPrivacyZone as setPrivacyZoneApi } from '../api/profile.js';
 import { MapSkeleton } from '../components/Skeleton.jsx';
 import { calculateDistance } from '../utils/geo.js';
+import { useT } from '../i18n/index.js';
+import { useThemeStore } from '../store/themeStore.js';
 import 'leaflet/dist/leaflet.css';
 
-// Компонент для программного управления камерой карты
 const MapController = ({ center }) => {
   const map = useMap();
   useEffect(() => {
@@ -30,7 +36,9 @@ const MapController = ({ center }) => {
 };
 
 export const Map = () => {
+  const t = useT();
   const navigate = useNavigate();
+  const theme = useThemeStore((s) => s.theme);
   const currentUser = useAuthStore((state) => state.currentUser);
   const myLocation = useLocationStore((state) => state.myLocation);
   const friendLocations = useLocationStore((state) => state.friendLocations);
@@ -49,19 +57,39 @@ export const Map = () => {
   useEffect(() => {
     const asked = localStorage.getItem('notif_prompted');
     if (!asked) {
-      requestNotificationPermission().finally(() => {
-        localStorage.setItem('notif_prompted', '1');
-      });
+      requestNotificationPermission().finally(() => localStorage.setItem('notif_prompted', '1'));
     }
   }, []);
 
   const [selectedFriend, setSelectedFriend] = useState(null);
-  const [mapCenter, setMapCenter] = useState([55.7558, 37.6173]); // Москва по умолчанию
+  const [mapCenter, setMapCenter] = useState([55.7558, 37.6173]);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [showRoute, setShowRoute] = useState(false);
+  const [routePoints, setRoutePoints] = useState([]);
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [heatmapData, setHeatmapData] = useState([]);
+  const [showFences, setShowFences] = useState(false);
+  const [fences, setFences] = useState([]);
+  const [meetingInvite, setMeetingInvite] = useState(null);
+  const [etaPing, setEtaPing] = useState(null); // {fromUser, lat, lng, etaMin}
+  const [checkinPlace, setCheckinPlace] = useState(null);
+  const [privacyZone, setPrivacyZone] = useState(null);
+  const [liveShareUntil, setLiveShareUntil] = useState(null);
+
   useEffect(() => {
-    const loadFriends = async () => {
+    let cancelled = false;
+    getProfile().then((p) => {
+      if (cancelled) return;
+      setPrivacyZone(p.privacyZone || null);
+      setLiveShareUntil(p.liveShareUntil || null);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
       try {
         const data = await getFriends();
         setFriends(data);
@@ -71,12 +99,9 @@ export const Map = () => {
       } finally {
         setLoading(false);
       }
-    };
-
-    loadFriends();
+    })();
   }, [setFriends]);
 
-  // Инициализация локаций друзей при загрузке списка
   useEffect(() => {
     if (isReady && friends.length > 0) {
       friends.forEach((f) => {
@@ -95,7 +120,6 @@ export const Map = () => {
     }
   }, [isReady, friends, updateFriendLocation]);
 
-  // Авто-центрирование при первом получении своей локации
   useEffect(() => {
     if (myLocation && !hasCenteredInitially) {
       setMapCenter([myLocation.lat, myLocation.lng]);
@@ -103,21 +127,69 @@ export const Map = () => {
     }
   }, [myLocation, hasCenteredInitially]);
 
-  // Центрирование на текущем пользователе
+  // Подгрузка маршрута
+  useEffect(() => {
+    if (!showRoute) return;
+    (async () => {
+      try {
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const points = await getHistory({ from: start.toISOString() });
+        setRoutePoints(points || []);
+      } catch {}
+    })();
+  }, [showRoute]);
+
+  useEffect(() => {
+    if (!showHeatmap) return;
+    (async () => {
+      try {
+        const data = await getHeatmap({ days: 7 });
+        setHeatmapData(data || []);
+      } catch {}
+    })();
+  }, [showHeatmap]);
+
+  useEffect(() => {
+    if (!showFences) return;
+    (async () => {
+      try {
+        setFences(await getGeofences() || []);
+      } catch {}
+    })();
+  }, [showFences]);
+
+  // ETA / Meeting socket events
+  useEffect(() => {
+    if (!socket) return;
+    const onMeeting = (data) => {
+      setMeetingInvite(data);
+      setToast({ message: `${data.fromName} ${t('map_meeting_received')}`, type: 'success' });
+    };
+    const onEta = (data) => {
+      setEtaPing(data);
+    };
+    const onEtaStop = (data) => {
+      setEtaPing(null);
+    };
+    socket.on('meeting-invite', onMeeting);
+    socket.on('eta-update', onEta);
+    socket.on('eta-stopped', onEtaStop);
+    return () => {
+      socket.off('meeting-invite', onMeeting);
+      socket.off('eta-update', onEta);
+      socket.off('eta-stopped', onEtaStop);
+    };
+  }, [socket, t]);
+
   const handleCenterMap = () => {
     if (myLocation) {
       setMapCenter([myLocation.lat, myLocation.lng]);
-    } else if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-      setToast({ 
-        message: 'Нужен HTTPS для работы GPS с телефона!', 
-        type: 'error' 
-      });
     } else {
-      setToast({ message: 'Геолокация недоступна', type: 'error' });
+      setToast({ message: t('error'), type: 'error' });
     }
   };
 
-  // Переход в чат с другом
   const handleMessageFriend = async (friend) => {
     if (!friend) return;
     try {
@@ -125,60 +197,145 @@ export const Map = () => {
       setSelectedFriend(null);
       navigate(`/chat/${conversation._id}`, { state: { friend } });
     } catch (error) {
-      console.error('Ошибка создания разговора:', error);
-      setToast({ message: 'Не удалось открыть чат', type: 'error' });
+      setToast({ message: t('error'), type: 'error' });
     }
   };
 
-  // Включение режима призрака
-  const handleGhostMode = async () => {
+  const handleGhostMode = () => {
     setGhostMode(!ghostMode);
-    
-    // Отправляем на сервер через Socket
     if (socket && myLocation) {
       socket.emit('update-location', {
-        lat: myLocation.lat,
-        lng: myLocation.lng,
-        accuracy: myLocation.accuracy,
+        lat: myLocation.lat, lng: myLocation.lng, accuracy: myLocation.accuracy,
         ghostMode: !ghostMode,
       });
     }
+    setToast({ message: !ghostMode ? t('map_ghost_on') : t('map_ghost_off'), type: 'ghost' });
+  };
 
-    setToast({
-      message: !ghostMode ? 'Ты невидим для всех' : 'Ты видим для друзей',
-      type: 'ghost',
+  // Meeting point: середина пути
+  const handleInviteMeeting = (friend) => {
+    if (!myLocation || !friend?.location) {
+      setToast({ message: 'Нужны обе локации', type: 'error' });
+      return;
+    }
+    const lat = (myLocation.lat + friend.location.lat) / 2;
+    const lng = (myLocation.lng + friend.location.lng) / 2;
+    if (socket) {
+      socket.emit('meeting-invite', {
+        recipientId: friend.id || friend._id,
+        lat, lng,
+        name: 'Встреча на полпути',
+      });
+      setToast({ message: 'Приглашение отправлено', type: 'success' });
+      setSelectedFriend(null);
+    }
+  };
+
+  // ETA share — простое: расстояние / 5 км/ч
+  const handleShareEta = (friend) => {
+    if (!myLocation || !friend?.location) return;
+    const dist = calculateDistance(myLocation.lat, myLocation.lng, friend.location.lat, friend.location.lng);
+    const meters = dist.unit === 'км' ? parseFloat(dist.value) * 1000 : dist.value;
+    const etaMin = Math.max(1, Math.round(meters / 1000 / 5 * 60));
+    if (socket) {
+      socket.emit('eta-share', {
+        recipientId: friend.id || friend._id,
+        destLat: friend.location.lat,
+        destLng: friend.location.lng,
+        destName: friend.name,
+        etaMinutes: etaMin,
+      });
+      setToast({ message: `ETA ${etaMin} мин отправлен`, type: 'success' });
+      setSelectedFriend(null);
+    }
+  };
+
+  const onCheckIn = async () => {
+    if (!myLocation) return;
+    setCheckinPlace({
+      placeName: 'Здесь',
+      lat: myLocation.lat,
+      lng: myLocation.lng,
+      note: '',
     });
   };
 
-  if (loading) {
-    return <MapSkeleton />;
-  }
+  const submitCheckin = async () => {
+    try {
+      const data = await createCheckin({
+        placeName: checkinPlace.placeName,
+        lat: checkinPlace.lat,
+        lng: checkinPlace.lng,
+        note: checkinPlace.note,
+        emoji: '📍',
+      });
+      setToast({ message: `+${data.checkin.points} очков!`, type: 'success' });
+      setCheckinPlace(null);
+    } catch (e) {
+      setToast({ message: e.response?.data?.error || t('error'), type: 'error' });
+    }
+  };
+
+  const tileUrl = theme === 'light'
+    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+
+  if (loading) return <MapSkeleton />;
 
   return (
     <div className="relative w-full h-screen bg-bg overflow-hidden">
-      {/* Background glow behind the map */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-0">
-         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] bg-accent/10 rounded-full blur-[120px] mix-blend-screen" />
-      </div>
-
-      {/* Mapbox Карта */}
-      <MapContainer
-        center={mapCenter}
-        zoom={13}
-        className="w-full h-full z-10"
-        attributionControl={false}
-      >
+      <MapContainer center={mapCenter} zoom={13} className="w-full h-full z-10" attributionControl={false}>
         <MapController center={mapCenter} />
-        
-        {/* CartoDB Dark Matter тема */}
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        />
+        <TileLayer url={tileUrl} />
+
+        {/* Geofences */}
+        {showFences && fences.map((f) => (
+          <Circle
+            key={f._id}
+            center={[f.lat, f.lng]}
+            radius={f.radius}
+            pathOptions={{ color: '#00d9ff', fillColor: '#00d9ff', fillOpacity: 0.1, weight: 2, dashArray: '4 4' }}
+          />
+        ))}
+
+        {/* Privacy zone — жёлтый круг (только владельцу) */}
+        {privacyZone?.active && (
+          <Circle
+            center={[privacyZone.lat, privacyZone.lng]}
+            radius={privacyZone.radius || 200}
+            pathOptions={{ color: '#ffd60a', fillColor: '#ffd60a', fillOpacity: 0.08, weight: 2, dashArray: '8 6' }}
+          />
+        )}
+
+        {/* Route polyline */}
+        {showRoute && routePoints.length > 1 && (
+          <Polyline
+            positions={routePoints.map((p) => [p.lat, p.lng])}
+            pathOptions={{ color: '#00d9ff', weight: 4, opacity: 0.7 }}
+          />
+        )}
+
+        {/* Heatmap circles (poor man's heat) */}
+        {showHeatmap && heatmapData.map((h, i) => (
+          <Circle
+            key={i}
+            center={[h.lat, h.lng]}
+            radius={50}
+            pathOptions={{ color: '#ff006e', fillColor: '#ff006e', fillOpacity: Math.min(0.7, h.intensity), stroke: false }}
+          />
+        ))}
+
+        {/* Meeting point */}
+        {meetingInvite && (
+          <Marker position={[meetingInvite.lat, meetingInvite.lng]}>
+            <Popup>📍 {meetingInvite.name} от {meetingInvite.fromName}</Popup>
+          </Marker>
+        )}
 
         {/* Мой маркер */}
         {myLocation && (
           <Marker position={[myLocation.lat, myLocation.lng]} icon={createMyMarker()}>
-            <Popup>Я здесь</Popup>
+            <Popup>{t('map_my_location')}</Popup>
           </Marker>
         )}
 
@@ -187,7 +344,6 @@ export const Map = () => {
           const friendId = friend.id || friend._id;
           const location = friendLocations.get(friendId);
           if (!location || friend.ghostMode) return null;
-
           return (
             <Marker
               key={friendId}
@@ -195,81 +351,140 @@ export const Map = () => {
               icon={createFriendMarker(friend, friend.color)}
               eventHandlers={{
                 click: () => {
-                  const dist = myLocation 
+                  const dist = myLocation
                     ? calculateDistance(myLocation.lat, myLocation.lng, location.lat, location.lng)
                     : null;
                   setSelectedFriend({ ...friend, location, distance: dist });
                 },
               }}
             >
-              <Popup>{friend.name}</Popup>
+              <Popup>{friend.nickname || friend.name}</Popup>
             </Marker>
           );
         })}
       </MapContainer>
 
-      {/* Кнопка "Найти меня" */}
-      <button
-        onClick={handleCenterMap}
-        className="press absolute bottom-24 right-4 bg-surface/85 backdrop-blur-xl border border-white/10 text-white w-12 h-12 flex items-center justify-center rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.5)] hover:border-accent/50 transition-all z-40 group"
-        title="Центрировать карту"
-        aria-label="Центрировать карту"
-      >
-        <Navigation size={20} className="group-hover:text-accent transition-colors" />
-      </button>
+      {/* Top toolbar */}
+      <div className="absolute top-0 left-0 right-0 px-4 pt-4 z-40 safe-top">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60 tracking-widest uppercase drop-shadow-lg pointer-events-none">Blink</h1>
+          {connected ? (
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-md text-emerald-400 px-3.5 py-1.5 rounded-xl text-xs font-bold pointer-events-none">
+              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+              {t('online')}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 backdrop-blur-md text-red-500 px-3.5 py-1.5 rounded-xl text-xs font-bold pointer-events-none">
+              <div className="w-2 h-2 bg-red-500 rounded-full" />
+              {t('offline')}
+            </div>
+          )}
+        </div>
 
-      {/* Кнопка "Режим призрака" */}
-      <button
-        onClick={handleGhostMode}
-        className={`press absolute bottom-24 left-4 w-12 h-12 flex items-center justify-center rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.5)] border transition-all z-40 ${
-          ghostMode
-            ? 'bg-amber-500/20 border-amber-500/50 text-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.25)]'
-            : 'bg-surface/85 backdrop-blur-xl border-white/10 text-white hover:border-white/30'
-        }`}
-        title="Режим призрака"
-        aria-label="Режим призрака"
-      >
-        <Ghost size={20} className={ghostMode ? 'animate-pulse' : ''} />
-      </button>
+        {/* Toggles row */}
+        <div className="flex gap-2 mt-3 overflow-x-auto no-scrollbar">
+          <button onClick={() => setShowRoute(!showRoute)} className={`press shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur-md border ${showRoute ? 'bg-accent text-black border-accent' : 'bg-surface/80 text-white border-white/10'}`}>
+            <Route size={14} /> {t('map_show_route')}
+          </button>
+          <button onClick={() => setShowHeatmap(!showHeatmap)} className={`press shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur-md border ${showHeatmap ? 'bg-accent2 text-white border-accent2' : 'bg-surface/80 text-white border-white/10'}`}>
+            <Flame size={14} /> {t('map_show_heatmap')}
+          </button>
+          <button onClick={() => setShowFences(!showFences)} className={`press shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur-md border ${showFences ? 'bg-accent3 text-white border-accent3' : 'bg-surface/80 text-white border-white/10'}`}>
+            <Shield size={14} /> {t('profile_geofences')}
+          </button>
+          <button onClick={() => navigate('/steps')} className="press shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur-md border bg-surface/80 text-white border-white/10">
+            <Footprints size={14} /> {t('nav_steps')}
+          </button>
+          <div className="shrink-0">
+            <LiveShareButton initialUntil={liveShareUntil} />
+          </div>
+        </div>
+      </div>
 
-      {/* Индикатор режима призрака */}
-      {ghostMode && (
-        <div className="absolute top-16 left-1/2 transform -translate-x-1/2 bg-amber-500/10 border border-amber-500/30 backdrop-blur-md text-amber-400 px-5 py-2.5 rounded-2xl text-sm font-bold z-40 flex items-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.2)] animate-slideUp">
-          <Ghost size={16} className="animate-bounce" />
-          <span>Режим Призрака</span>
+      {etaPing && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 bg-accent text-black px-4 py-2 rounded-2xl text-sm font-bold z-40 shadow-lg animate-slideUp">
+          ⏱ {etaPing.name}: {etaPing.etaMinutes} мин
         </div>
       )}
 
-      {/* Попап при клике на пин друга */}
+      {/* Кнопки */}
+      <button onClick={handleCenterMap} className="press absolute bottom-24 right-4 bg-surface/85 backdrop-blur-xl border border-white/10 text-white w-12 h-12 flex items-center justify-center rounded-2xl z-40">
+        <Navigation size={20} />
+      </button>
+
+      <button onClick={onCheckIn} className="press absolute bottom-40 right-4 bg-accent text-black w-12 h-12 flex items-center justify-center rounded-2xl z-40 font-bold">
+        <Pin size={20} />
+      </button>
+
+      <button onClick={handleGhostMode} className={`press absolute bottom-24 left-4 w-12 h-12 flex items-center justify-center rounded-2xl border z-40 ${ghostMode ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'bg-surface/85 backdrop-blur-xl border-white/10 text-white'}`}>
+        <Ghost size={20} className={ghostMode ? 'animate-pulse' : ''} />
+      </button>
+
+      <button
+        onClick={async () => {
+          if (!myLocation) return setToast({ message: 'Сначала разреши геолокацию', type: 'error' });
+          if (privacyZone?.active) {
+            if (!confirm('Убрать приватную зону?')) return;
+            try {
+              await setPrivacyZoneApi({ active: false });
+              setPrivacyZone(null);
+              setToast({ message: 'Приватная зона убрана', type: 'success' });
+            } catch (e) { setToast({ message: 'Ошибка', type: 'error' }); }
+          } else {
+            try {
+              const r = await setPrivacyZoneApi({ lat: myLocation.lat, lng: myLocation.lng, radius: 200, active: true });
+              setPrivacyZone(r.privacyZone);
+              setToast({ message: 'Зона 200м создана здесь', type: 'success' });
+            } catch (e) { setToast({ message: 'Ошибка', type: 'error' }); }
+          }
+        }}
+        title="Приватная зона"
+        className={`press absolute bottom-40 left-4 w-12 h-12 flex items-center justify-center rounded-2xl border z-40 ${privacyZone?.active ? 'bg-yellow-500/20 border-yellow-500/40 text-yellow-300' : 'bg-surface/85 backdrop-blur-xl border-white/10 text-white'}`}
+      >
+        <Shield size={20} />
+      </button>
+
+      {ghostMode && (
+        <div className="absolute top-32 left-1/2 -translate-x-1/2 bg-amber-500/10 border border-amber-500/30 backdrop-blur-md text-amber-400 px-5 py-2.5 rounded-2xl text-sm font-bold z-40 flex items-center gap-2 animate-slideUp">
+          <Ghost size={16} />
+          <span>{t('map_ghost_on')}</span>
+        </div>
+      )}
+
       {selectedFriend && (
         <FriendPopup
           friend={selectedFriend}
           distance={selectedFriend.distance}
           onClose={() => setSelectedFriend(null)}
           onMessage={handleMessageFriend}
+          onMeet={() => handleInviteMeeting(selectedFriend)}
+          onEta={() => handleShareEta(selectedFriend)}
         />
       )}
 
-      {/* Нижняя навигация */}
+      {meetingInvite && (
+        <div className="absolute bottom-40 left-1/2 -translate-x-1/2 bg-surface/90 backdrop-blur-xl border border-accent/40 rounded-2xl p-3 z-40 shadow-lg animate-slideUp">
+          <p className="text-white text-sm">{meetingInvite.fromName} {t('map_meeting_received')}</p>
+          <div className="flex gap-2 mt-2">
+            <button onClick={() => { setMapCenter([meetingInvite.lat, meetingInvite.lng]); setMeetingInvite(null); }} className="press bg-accent text-black rounded-xl px-3 py-1.5 text-xs font-bold">Показать</button>
+            <button onClick={() => setMeetingInvite(null)} className="press bg-white/10 text-white rounded-xl px-3 py-1.5 text-xs">{t('cancel')}</button>
+          </div>
+        </div>
+      )}
+
+      {checkinPlace && (
+        <div className="fixed inset-x-4 bottom-32 z-50 max-w-md mx-auto bg-surface/95 backdrop-blur-xl border border-white/10 rounded-2xl p-4 animate-slideUp">
+          <p className="text-white font-bold mb-2">{t('checkin_button')}</p>
+          <input value={checkinPlace.placeName} onChange={(e) => setCheckinPlace({ ...checkinPlace, placeName: e.target.value })} placeholder="Название места" maxLength={60} className="mb-2" />
+          <input value={checkinPlace.note} onChange={(e) => setCheckinPlace({ ...checkinPlace, note: e.target.value })} placeholder={t('checkin_note_placeholder')} maxLength={200} className="mb-2" />
+          <div className="flex gap-2">
+            <button onClick={() => setCheckinPlace(null)} className="press flex-1 bg-white/10 rounded-xl py-2 text-white">{t('cancel')}</button>
+            <button onClick={submitCheckin} className="press flex-1 bg-accent text-black rounded-xl py-2 font-bold">{t('save')}</button>
+          </div>
+        </div>
+      )}
+
       <BottomNav />
-
-      {/* Статус подключения & Title */}
-      <div className="absolute top-0 left-0 right-0 px-4 pt-4 flex justify-between items-center z-40 pointer-events-none safe-top">
-        <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white to-white/60 tracking-widest uppercase drop-shadow-lg">Blink</h1>
-        
-        {connected ? (
-          <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 backdrop-blur-md text-emerald-400 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_5px_rgba(16,185,129,0.8)]" />
-            Онлайн
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 backdrop-blur-md text-red-500 px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-[0_0_15px_rgba(239,68,68,0.1)]">
-            <div className="w-2 h-2 bg-red-500 rounded-full shadow-[0_0_5px_rgba(239,68,68,0.8)]" />
-            Оффлайн
-          </div>
-        )}
-      </div>
-
       {toast && <Toast message={toast.message} type={toast.type} />}
     </div>
   );

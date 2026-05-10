@@ -11,7 +11,12 @@ export const authMiddleware = (req, res, next) => {
 
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
+    // Refresh-токены имеют typ='refresh' и не должны проходить по REST-роутам.
+    if (decoded?.typ && decoded.typ !== 'access') {
+      return res.status(401).json({ error: 'Неверный тип токена' });
+    }
+
     req.user = decoded;
     next();
   } catch (error) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Avatar } from './Avatar.jsx';
-import { X, Send, Navigation2, Clock, MapPin, Gauge, Wifi, WifiOff } from 'lucide-react';
+import { X, Send, Navigation2, Clock, MapPin, Gauge, Wifi, WifiOff, MoreVertical, Ban, Flag } from 'lucide-react';
+import { blockUser, reportUser } from '../api/profile.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -39,9 +40,38 @@ const formatSpeed = (speed) => {
   return { label: 'Едет', value: `${kmh.toFixed(0)} км/ч` };
 };
 
-export const FriendPopup = ({ friend, distance, onClose, onMessage }) => {
+export const FriendPopup = ({ friend, distance, onClose, onMessage, onMeet, onEta, onBlocked }) => {
   const [timeText, setTimeText] = useState(() => formatUpdated(friend.location?.updatedAt));
   const [lastSeenText, setLastSeenText] = useState(() => formatLastSeen(friend.lastSeen));
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const handleBlock = async () => {
+    if (!confirm(`Заблокировать ${friend.name}? Дружба будет удалена.`)) return;
+    setBusy(true);
+    try {
+      await blockUser(friend.id);
+      onBlocked?.(friend.id);
+      onClose();
+    } catch (e) {
+      alert(e.response?.data?.error || 'Ошибка блокировки');
+    } finally { setBusy(false); }
+  };
+
+  const handleReport = async () => {
+    if (reason.trim().length < 3) return;
+    setBusy(true);
+    try {
+      await reportUser(friend.id, reason.trim());
+      setReportOpen(false);
+      setReason('');
+      alert('Жалоба отправлена. Спасибо.');
+    } catch (e) {
+      alert(e.response?.data?.error || 'Ошибка');
+    } finally { setBusy(false); }
+  };
 
   useEffect(() => {
     setTimeText(formatUpdated(friend.location?.updatedAt));
@@ -89,10 +119,67 @@ export const FriendPopup = ({ friend, distance, onClose, onMessage }) => {
               <p className="text-white/50 text-xs font-medium">{friend.email}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white">
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white"
+                aria-label="Ещё"
+              >
+                <MoreVertical size={18} />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 w-48 bg-surface border border-white/10 rounded-2xl shadow-xl py-1 z-20">
+                  <button
+                    onClick={() => { setMenuOpen(false); setReportOpen(true); }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-white/90 hover:bg-white/5 flex items-center gap-2"
+                  >
+                    <Flag size={14} /> Пожаловаться
+                  </button>
+                  <button
+                    onClick={() => { setMenuOpen(false); handleBlock(); }}
+                    disabled={busy}
+                    className="w-full text-left px-4 py-2.5 text-sm text-danger hover:bg-danger/10 flex items-center gap-2"
+                  >
+                    <Ban size={14} /> Заблокировать
+                  </button>
+                </div>
+              )}
+            </div>
+            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/50 hover:text-white">
+              <X size={20} />
+            </button>
+          </div>
         </div>
+
+        {reportOpen && (
+          <div className="mb-4 p-4 bg-black/40 border border-white/10 rounded-2xl space-y-3 relative z-10">
+            <p className="text-white/80 text-sm font-medium">Опишите причину жалобы:</p>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              rows={3}
+              placeholder="Спам, оскорбления, фейк..."
+              className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-accent resize-none"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setReportOpen(false); setReason(''); }}
+                className="flex-1 bg-white/10 text-white py-2 rounded-xl text-sm font-medium"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleReport}
+                disabled={busy || reason.trim().length < 3}
+                className="flex-1 bg-danger text-white py-2 rounded-xl text-sm font-bold disabled:opacity-50"
+              >
+                Отправить
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-3 mb-6 relative z-10">
           {/* Online / Last seen */}
@@ -165,17 +252,30 @@ export const FriendPopup = ({ friend, distance, onClose, onMessage }) => {
           )}
         </div>
 
-        {/* Message button */}
-        <div className="flex gap-3 relative z-10">
+        {/* Actions */}
+        <div className="flex flex-col gap-2 relative z-10">
           <button
             onClick={() => onMessage && onMessage(friend)}
             disabled={!onMessage}
-            className="flex-1 bg-gradient-to-r from-accent to-accent3 text-white py-3.5 rounded-2xl font-bold flex items-center justify-center gap-2 hover:shadow-[0_0_20px_rgba(0,217,255,0.3)] transition-all group overflow-hidden relative disabled:opacity-50 disabled:cursor-not-allowed"
+            className="press flex-1 bg-gradient-to-r from-accent to-accent3 text-white py-3 rounded-2xl font-bold flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <span className="relative z-10">Написать</span>
-            <Send size={16} className="relative z-10 group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform" />
-            <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform" />
+            <span>Написать</span>
+            <Send size={16} />
           </button>
+          {(onMeet || onEta) && (
+            <div className="grid grid-cols-2 gap-2">
+              {onMeet && (
+                <button onClick={() => onMeet()} className="press bg-white/8 border border-white/10 text-white py-2 rounded-2xl font-medium text-sm">
+                  📍 Встретиться
+                </button>
+              )}
+              {onEta && (
+                <button onClick={() => onEta()} className="press bg-white/8 border border-white/10 text-white py-2 rounded-2xl font-medium text-sm">
+                  ⏱ ETA
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

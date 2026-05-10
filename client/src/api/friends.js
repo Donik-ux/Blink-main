@@ -35,3 +35,9 @@ export const removeFriend = async (friendId) => {
   const response = await apiClient.delete(`/friends/${friendId}`);
   return response.data;
 };
+
+// PUT /api/friends/:friendId/nickname
+export const setFriendNickname = async (friendId, nickname) => {
+  const response = await apiClient.put(`/friends/${friendId}/nickname`, { nickname });
+  return response.data;
+};

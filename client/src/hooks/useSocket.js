@@ -128,6 +128,41 @@ export const useSocket = () => {
       }
     });
 
+    socket.on('badges-unlocked', (data) => {
+      try {
+        if (data?.badges?.length) {
+          for (const b of data.badges) {
+            addNotification({
+              id: `badge-${b.id}-${Date.now()}`,
+              type: 'badge',
+              text: `${b.emoji} ${b.title}`,
+              read: false,
+              createdAt: new Date(),
+            });
+            if (navigator.vibrate) navigator.vibrate([60, 30, 60]);
+          }
+        }
+      } catch {}
+    });
+
+    socket.on('geofence-trigger', (data) => {
+      try {
+        addNotification({
+          id: `fence-${data.fenceId}-${Date.now()}`,
+          type: 'geofence',
+          text: `${data.emoji} ${data.name} • ${data.event === 'enter' ? 'вход' : 'выход'}`,
+          read: false,
+          createdAt: new Date(),
+        });
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          new Notification(`${data.emoji} ${data.name}`, {
+            body: data.event === 'enter' ? 'Ты вошёл в зону' : 'Ты покинул зону',
+            tag: `fence-${data.fenceId}`,
+          });
+        }
+      } catch {}
+    });
+
     socket.on('error', (error) => {
       console.error('Socket ошибка:', error);
     });

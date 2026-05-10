@@ -14,12 +14,55 @@ const messageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      required: true,
+      default: '',
       trim: true,
+    },
+    // 'text' | 'voice' | 'image' | 'system'
+    kind: {
+      type: String,
+      default: 'text',
+    },
+    // base64 data URL для голосовых сообщений
+    audio: {
+      type: String,
+      default: null,
+    },
+    audioDuration: {
+      type: Number,
+      default: 0,
+    },
+    // base64 data URL для image-сообщений (сжимается на клиенте до ~150KB)
+    image: {
+      type: String,
+      default: null,
     },
     isRead: {
       type: Boolean,
       default: false,
+    },
+    // userId -> ISO timestamp когда увидел
+    seenBy: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    // userId -> emoji
+    reactions: {
+      type: Map,
+      of: String,
+      default: {},
+    },
+    editedAt: {
+      type: Date,
+      default: null,
+    },
+    deleted: {
+      type: Boolean,
+      default: false,
+    },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
     },
   },
   { timestamps: true }

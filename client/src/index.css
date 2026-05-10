@@ -28,6 +28,42 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* === Light theme overrides === */
+html.light body {
+  background: #f4f5f8;
+  color: rgba(15, 15, 20, 0.92);
+}
+html.light .bg-bg { background: #f4f5f8 !important; }
+html.light .bg-bg\/85 { background: rgba(244, 245, 248, 0.85) !important; }
+html.light .bg-bg\/90 { background: rgba(244, 245, 248, 0.90) !important; }
+html.light .bg-bg\/95 { background: rgba(244, 245, 248, 0.95) !important; }
+html.light .bg-surface { background: #ffffff !important; }
+html.light .bg-surface\/80 { background: rgba(255, 255, 255, 0.80) !important; }
+html.light .bg-surface2 { background: #f0f1f5 !important; }
+html.light .bg-surface2\/50 { background: rgba(240, 241, 245, 0.5) !important; }
+html.light .bg-surface2\/80 { background: rgba(240, 241, 245, 0.8) !important; }
+html.light .text-white,
+html.light .text-white\/95,
+html.light .text-white\/90 { color: rgba(15, 15, 20, 0.92) !important; }
+html.light .text-white\/80 { color: rgba(15, 15, 20, 0.85) !important; }
+html.light .text-white\/70 { color: rgba(15, 15, 20, 0.72) !important; }
+html.light .text-white\/60 { color: rgba(15, 15, 20, 0.60) !important; }
+html.light .text-white\/50 { color: rgba(15, 15, 20, 0.50) !important; }
+html.light .text-white\/40 { color: rgba(15, 15, 20, 0.42) !important; }
+html.light .text-white\/30 { color: rgba(15, 15, 20, 0.32) !important; }
+html.light .text-white\/20 { color: rgba(15, 15, 20, 0.22) !important; }
+html.light .border-white\/5 { border-color: rgba(15, 15, 20, 0.07) !important; }
+html.light .border-white\/10 { border-color: rgba(15, 15, 20, 0.10) !important; }
+html.light .border-white\/15 { border-color: rgba(15, 15, 20, 0.13) !important; }
+html.light .border-white\/20 { border-color: rgba(15, 15, 20, 0.18) !important; }
+html.light .bg-white\/5 { background: rgba(15, 15, 20, 0.05) !important; }
+html.light .bg-white\/10 { background: rgba(15, 15, 20, 0.08) !important; }
+html.light .glass {
+  background: rgba(255, 255, 255, 0.78) !important;
+  border-color: rgba(15, 15, 20, 0.08) !important;
+}
+html.light .leaflet-container { background: #e8eaef !important; }
+
 /* iOS — отключаем зум при двойном тапе */
 button, a, [role="button"] {
   touch-action: manipulation;

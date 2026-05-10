@@ -1,21 +1,26 @@
 import { useEffect, useRef } from 'react';
 import { useLocationStore } from '../store/locationStore.js';
 import { useFriendStore } from '../store/friendStore.js';
-
+import { useBatterySaver } from './useBatterySaver.js';
 import { calculateDistance } from '../utils/geo.js';
 
-// Минимальная дистанция между отправками, чтобы не спамить сервер при шуме GPS
 const MIN_DELTA_M = 15;
 const MIN_EMIT_INTERVAL_MS = 3000;
+const SAVER_DELTA_M = 100;
+const SAVER_EMIT_INTERVAL_MS = 30000;
 
 export const useGeolocation = (socket) => {
   const watchIdRef = useRef(null);
   const lastSentRef = useRef(null);
   const setMyLocation = useLocationStore((state) => state.setMyLocation);
   const ghostMode = useFriendStore((state) => state.ghostMode);
+  const batterySaver = useBatterySaver();
 
   useEffect(() => {
     if (!navigator.geolocation) return;
+
+    const minDelta = batterySaver ? SAVER_DELTA_M : MIN_DELTA_M;
+    const minInterval = batterySaver ? SAVER_EMIT_INTERVAL_MS : MIN_EMIT_INTERVAL_MS;
 
     const onPosition = (position) => {
       const { latitude, longitude, accuracy, speed, heading } = position.coords;
@@ -25,9 +30,8 @@ export const useGeolocation = (socket) => {
       const last = lastSentRef.current;
       const now = Date.now();
       const dist = calculateDistance(last?.lat, last?.lng, latitude, longitude);
-      // Fix: !dist handles null (no previous point), unit check handles km, value check handles meters
-      const movedEnough = !last || !dist || dist.unit === 'км' || dist.value >= MIN_DELTA_M;
-      const timeEnough = !last || now - last.t >= MIN_EMIT_INTERVAL_MS;
+      const movedEnough = !last || !dist || dist.unit === 'км' || dist.value >= minDelta;
+      const timeEnough = !last || now - last.t >= minInterval;
 
       if (!movedEnough && !timeEnough) return;
 
@@ -40,6 +44,7 @@ export const useGeolocation = (socket) => {
           speed: typeof speed === 'number' ? speed : null,
           heading: typeof heading === 'number' ? heading : null,
           ghostMode,
+          batterySaver,
         });
       }
     };
@@ -49,9 +54,9 @@ export const useGeolocation = (socket) => {
     };
 
     watchIdRef.current = navigator.geolocation.watchPosition(onPosition, onError, {
-      enableHighAccuracy: true,
+      enableHighAccuracy: !batterySaver,
       timeout: 15000,
-      maximumAge: 2000,
+      maximumAge: batterySaver ? 30000 : 2000,
     });
 
     return () => {
@@ -60,5 +65,5 @@ export const useGeolocation = (socket) => {
         watchIdRef.current = null;
       }
     };
-  }, [socket, setMyLocation, ghostMode]);
+  }, [socket, setMyLocation, ghostMode, batterySaver]);
 };

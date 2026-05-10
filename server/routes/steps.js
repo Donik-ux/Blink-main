@@ -3,6 +3,7 @@ import Steps from '../models/Steps.js';
 import Friendship from '../models/Friendship.js';
 import User from '../models/User.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { checkBadges } from '../utils/badges.js';
 
 const router = express.Router();
 
@@ -22,6 +23,11 @@ router.post('/', authMiddleware, async (req, res) => {
       { count, updatedAt: new Date() },
       { upsert: true, new: true }
     );
+
+    // Награждаем шагомер-badges (walker_10k / walker_50k)
+    User.findById(req.user.id)
+      .then((u) => u && checkBadges(u, req.app.get('io')))
+      .catch(() => {});
 
     res.json({ count: doc.count, date: doc.date });
   } catch (error) {

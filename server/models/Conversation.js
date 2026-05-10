@@ -9,6 +9,24 @@ const conversationSchema = new mongoose.Schema(
         required: true,
       },
     ],
+    // 'direct' | 'group'
+    kind: {
+      type: String,
+      default: 'direct',
+    },
+    title: {
+      type: String,
+      default: '',
+    },
+    avatar: {
+      type: String,
+      default: null,
+    },
+    // Owner of group (creator)
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
     lastMessage: {
       type: String,
       default: '',

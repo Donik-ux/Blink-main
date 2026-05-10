@@ -23,6 +23,12 @@ import notificationsRoutes from './routes/notifications.js';
 import savedLocationsRoutes from './routes/savedLocations.js';
 import messagesRoutes from './routes/messages.js';
 import stepsRoutes from './routes/steps.js';
+import storiesRoutes from './routes/stories.js';
+import geofencesRoutes from './routes/geofences.js';
+import historyRoutes from './routes/history.js';
+import checkinsRoutes from './routes/checkins.js';
+import badgesRoutes from './routes/badges.js';
+import pushRoutes from './routes/push.js';
 
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   console.error('✗ JWT_SECRET обязателен в production');
@@ -33,9 +39,15 @@ const START_TIME = Date.now();
 const app = express();
 const httpServer = createServer(app);
 
+// В production ограничиваем CORS до CLIENT_URL (если задан), иначе разрешаем любые источники.
+const corsOrigin =
+  process.env.NODE_ENV === 'production' && process.env.CLIENT_URL
+    ? process.env.CLIENT_URL
+    : true;
+
 const io = new Server(httpServer, {
   cors: {
-    origin: true, // Разрешаем любым источникам в режиме разработки
+    origin: corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -48,9 +60,9 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(securityHeaders);
 app.use(gzipMiddleware);
-app.use(express.json({ limit: '100kb' }));
-app.use(express.urlencoded({ extended: true, limit: '100kb' }));
-app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: '500kb' }));
+app.use(express.urlencoded({ extended: true, limit: '500kb' }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use('/api', apiLimiter);
 
 // JSON-ошибки
@@ -69,6 +81,12 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/saved-locations', savedLocationsRoutes);
 app.use('/api/chat', messagesRoutes);
 app.use('/api/steps', stepsRoutes);
+app.use('/api/stories', storiesRoutes);
+app.use('/api/geofences', geofencesRoutes);
+app.use('/api/history', historyRoutes);
+app.use('/api/checkins', checkinsRoutes);
+app.use('/api/badges', badgesRoutes);
+app.use('/api/push', pushRoutes);
 
 // Расширенный health
 app.get('/health', (req, res) => {

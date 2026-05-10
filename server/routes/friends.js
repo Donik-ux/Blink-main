@@ -6,6 +6,7 @@ import Notification from '../models/Notification.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { calculateDistance } from '../utils/haversine.js';
 import { onlineUsers } from '../socket/onlineStore.js';
+import { checkBadges } from '../utils/badges.js';
 
 const router = express.Router();
 
@@ -49,13 +50,26 @@ router.get('/', authMiddleware, async (req, res) => {
         distance = calculateDistance(myLocation.lat, myLocation.lng, location.lat, location.lng);
       }
 
+      // Псевдоним, который мне сохранил для этого друга
+      let nickname = '';
+      const nickMap = friendData.nicknames;
+      if (nickMap instanceof Map) {
+        nickname = nickMap.get(String(req.user.id)) || '';
+      } else if (nickMap && typeof nickMap === 'object') {
+        nickname = nickMap[String(req.user.id)] || '';
+      }
+
       const isOnline = onlineUsers.has(friendId.toString());
       return {
         id: friend._id,
+        friendshipId: friendData._id,
         name: friend.name,
+        nickname,
         email: friend.email,
         color: friend.color,
         avatar: friend.avatar,
+        mood: friend.mood || '',
+        moodEmoji: friend.moodEmoji || '',
         ghostMode: friend.ghostMode,
         online: isOnline,
         lastSeen: friend.lastSeen || null,
@@ -173,6 +187,12 @@ router.post('/invite', authMiddleware, async (req, res) => {
       });
     }
 
+    // Проверяем badges для обеих сторон
+    Promise.all([
+      checkBadges(currentUser, io),
+      checkBadges(friend, io),
+    ]).catch(() => {});
+
     res.status(201).json({
       message: `${friend.name} добавлен в друзья!`,
       friend: {
@@ -212,6 +232,13 @@ router.put('/:id/accept', authMiddleware, async (req, res) => {
       fromUser: req.user.id,
     });
 
+    // Badges для обеих сторон
+    const io = req.app.get('io');
+    Promise.all([
+      User.findById(req.user.id).then((u) => u && checkBadges(u, io)),
+      User.findById(friendship.requester).then((u) => u && checkBadges(u, io)),
+    ]).catch(() => {});
+
     res.json({ message: 'Запрос принят' });
   } catch (error) {
     console.error('Ошибка принятия запроса:', error);
@@ -237,6 +264,34 @@ router.put('/:id/reject', authMiddleware, async (req, res) => {
     res.json({ message: 'Запрос отклонён' });
   } catch (error) {
     console.error('Ошибка отклонения запроса:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// PUT /api/friends/:friendId/nickname - сохранить личный псевдоним для друга
+router.put('/:friendId/nickname', authMiddleware, async (req, res) => {
+  try {
+    const { nickname } = req.body;
+    const friendship = await Friendship.findOne({
+      $or: [
+        { requester: req.user.id, recipient: req.params.friendId },
+        { requester: req.params.friendId, recipient: req.user.id },
+      ],
+      status: 'accepted',
+    });
+    if (!friendship) return res.status(404).json({ error: 'Дружба не найдена' });
+
+    if (!(friendship.nicknames instanceof Map)) friendship.nicknames = new Map();
+    const clean = (nickname || '').trim().slice(0, 40);
+    if (clean) {
+      friendship.nicknames.set(String(req.user.id), clean);
+    } else {
+      friendship.nicknames.delete(String(req.user.id));
+    }
+    await friendship.save();
+    res.json({ ok: true, nickname: clean });
+  } catch (error) {
+    console.error('Ошибка сохранения псевдонима:', error);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
