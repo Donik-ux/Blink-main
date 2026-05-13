@@ -8,6 +8,18 @@ export const useFriendStore = create((set) => ({
   setFriends: (friends) => set({ friends }),
   setRequests: (requests) => set({ requests }),
 
+  addRequest: (request) =>
+    set((state) =>
+      state.requests.some((r) => r.id === request.id)
+        ? state
+        : { requests: [request, ...state.requests] }
+    ),
+
+  removeRequest: (requestId) =>
+    set((state) => ({
+      requests: state.requests.filter((r) => r.id !== requestId),
+    })),
+
   addFriend: (friend) =>
     set((state) => ({ friends: [...state.friends, friend] })),
 

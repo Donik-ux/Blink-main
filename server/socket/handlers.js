@@ -439,5 +439,72 @@ export const setupSocketHandlers = (io) => {
         });
       } catch (error) {}
     });
+
+    // ===== WebRTC видеозвонок: relay-сигнализация =====
+
+    // Caller инициирует звонок → пересылаем offer получателю
+    socket.on('call-user', async (data) => {
+      try {
+        const userId = socket.userId;
+        const { to, offer, conversationId } = data || {};
+        if (!userId || !to || !offer) return;
+
+        const friendIds = await getFriendIds(userId);
+        if (!friendIds.includes(String(to))) {
+          socket.emit('call-error', { message: 'Получатель не в друзьях' });
+          return;
+        }
+        if (!onlineUsers.has(String(to))) {
+          socket.emit('call-error', { message: 'Пользователь не в сети', code: 'offline' });
+          return;
+        }
+
+        const caller = await User.findById(userId);
+        io.to(`user:${to}`).emit('incoming-call', {
+          from: {
+            id: userId,
+            name: caller?.name,
+            color: caller?.color,
+            avatar: caller?.avatar,
+          },
+          offer,
+          conversationId,
+        });
+      } catch (error) {
+        console.error('Ошибка CALL-USER события:', error);
+      }
+    });
+
+    // Callee ответил — пересылаем answer caller'у
+    socket.on('call-answer', (data) => {
+      const userId = socket.userId;
+      const { to, answer } = data || {};
+      if (!userId || !to || !answer) return;
+      io.to(`user:${to}`).emit('call-answered', { from: userId, answer });
+    });
+
+    // ICE-кандидаты в обе стороны
+    socket.on('ice-candidate', (data) => {
+      const userId = socket.userId;
+      const { to, candidate } = data || {};
+      if (!userId || !to || !candidate) return;
+      io.to(`user:${to}`).emit('ice-candidate', { from: userId, candidate });
+    });
+
+    // Callee отклонил звонок
+    socket.on('call-reject', (data) => {
+      const userId = socket.userId;
+      const { to } = data || {};
+      if (!userId || !to) return;
+      io.to(`user:${to}`).emit('call-rejected', { from: userId });
+    });
+
+    // Любая сторона завершает звонок
+    socket.on('call-end', (data) => {
+      const userId = socket.userId;
+      const { to } = data || {};
+      if (!userId || !to) return;
+      io.to(`user:${to}`).emit('call-ended', { from: userId });
+    });
   });
 };

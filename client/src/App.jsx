@@ -1,11 +1,13 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from './store/authStore.js';
 import { useThemeStore, applyTheme } from './store/themeStore.js';
 import { useI18n } from './i18n/index.js';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
 import { OfflineBanner } from './components/OfflineBanner.jsx';
 import { AppRatingPrompt } from './components/AppRatingPrompt.jsx';
+import { CallModal } from './components/CallModal.jsx';
+import { useSocket } from './hooks/useSocket.js';
 import { getProfile } from './api/profile.js';
 
 const Onboarding = lazy(() => import('./pages/Onboarding.jsx').then((m) => ({ default: m.Onboarding })));
@@ -39,13 +41,65 @@ const PageFallback = () => (
   </div>
 );
 
+const RedirectIfAuth = ({ children }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  return isAuthenticated ? <Navigate to="/map" replace /> : children;
+};
+
+const RootRedirect = () => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const onboardingDone = localStorage.getItem('onboarding_done');
+  if (isAuthenticated) return <Navigate to="/map" replace />;
+  return <Navigate to={onboardingDone ? '/login' : '/onboarding'} replace />;
+};
+
+const AnimatedRoutes = () => {
+  const location = useLocation();
+  return (
+    <div key={location.pathname} className="animate-pageIn">
+      <Routes location={location}>
+        <Route path="/onboarding" element={<RedirectIfAuth><Onboarding /></RedirectIfAuth>} />
+        <Route path="/login" element={<RedirectIfAuth><Login /></RedirectIfAuth>} />
+        <Route path="/register" element={<RedirectIfAuth><Register /></RedirectIfAuth>} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/verify-email" element={<VerifyEmail />} />
+        <Route path="/privacy" element={<Privacy />} />
+        <Route path="/terms" element={<Terms />} />
+
+        <Route path="/map" element={<PrivateRoute><Map /></PrivateRoute>} />
+        <Route path="/friends" element={<PrivateRoute><Friends /></PrivateRoute>} />
+        <Route path="/activity" element={<PrivateRoute><Activity /></PrivateRoute>} />
+        <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
+        <Route path="/steps" element={<PrivateRoute><Steps /></PrivateRoute>} />
+        <Route path="/chats" element={<PrivateRoute><ChatList /></PrivateRoute>} />
+        <Route path="/chats/new-group" element={<PrivateRoute><NewGroup /></PrivateRoute>} />
+        <Route path="/chat/:conversationId" element={<PrivateRoute><ChatWindow /></PrivateRoute>} />
+        <Route path="/stories" element={<PrivateRoute><Stories /></PrivateRoute>} />
+        <Route path="/geofences" element={<PrivateRoute><Geofences /></PrivateRoute>} />
+        <Route path="/badges" element={<PrivateRoute><Badges /></PrivateRoute>} />
+
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
+  );
+};
+
+// Поднимаем глобальный сокет и модалку звонка для авторизованных юзеров
+const GlobalShell = () => {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  useSocket();
+  if (!isAuthenticated) return null;
+  return <CallModal />;
+};
+
 function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const setUser = useAuthStore((state) => state.setUser);
   const logout = useAuthStore((state) => state.logout);
   const setTheme = useThemeStore((s) => s.setTheme);
   const setLocale = useI18n((s) => s.setLocale);
-  const onboardingDone = localStorage.getItem('onboarding_done');
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -101,43 +155,9 @@ function App() {
         <OfflineBanner />
         {isAuthenticated && <AppRatingPrompt />}
         <Suspense fallback={<PageFallback />}>
-          <Routes>
-            <Route path="/onboarding" element={isAuthenticated ? <Navigate to="/map" replace /> : <Onboarding />} />
-            <Route path="/login" element={isAuthenticated ? <Navigate to="/map" replace /> : <Login />} />
-            <Route path="/register" element={isAuthenticated ? <Navigate to="/map" replace /> : <Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/verify-email" element={<VerifyEmail />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-
-            <Route path="/map" element={<PrivateRoute><Map /></PrivateRoute>} />
-            <Route path="/friends" element={<PrivateRoute><Friends /></PrivateRoute>} />
-            <Route path="/activity" element={<PrivateRoute><Activity /></PrivateRoute>} />
-            <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
-            <Route path="/steps" element={<PrivateRoute><Steps /></PrivateRoute>} />
-            <Route path="/chats" element={<PrivateRoute><ChatList /></PrivateRoute>} />
-            <Route path="/chats/new-group" element={<PrivateRoute><NewGroup /></PrivateRoute>} />
-            <Route path="/chat/:conversationId" element={<PrivateRoute><ChatWindow /></PrivateRoute>} />
-            <Route path="/stories" element={<PrivateRoute><Stories /></PrivateRoute>} />
-            <Route path="/geofences" element={<PrivateRoute><Geofences /></PrivateRoute>} />
-            <Route path="/badges" element={<PrivateRoute><Badges /></PrivateRoute>} />
-
-            <Route
-              path="/"
-              element={
-                isAuthenticated ? (
-                  <Navigate to="/map" replace />
-                ) : onboardingDone ? (
-                  <Navigate to="/login" replace />
-                ) : (
-                  <Navigate to="/onboarding" replace />
-                )
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <AnimatedRoutes />
         </Suspense>
+        <GlobalShell />
       </BrowserRouter>
     </ErrorBoundary>
   );

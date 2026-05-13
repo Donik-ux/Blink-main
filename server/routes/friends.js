@@ -149,40 +149,32 @@ router.post('/invite', authMiddleware, async (req, res) => {
       return res.status(409).json({ error: 'Уже в друзьях или есть запрос' });
     }
 
-    // Создаём дружбу со статусом 'accepted' (мгновенно)
+    // Создаём дружбу со статусом 'pending' — ждёт подтверждения получателем
     const friendship = await Friendship.create({
       requester: req.user.id,
       recipient: friend._id,
-      status: 'accepted',
+      status: 'pending',
     });
 
-    // Создаём уведомление
+    // Уведомление получателю о новом запросе
     await Notification.create({
       userId: friend._id,
       type: 'friend_request',
       fromUser: req.user.id,
     });
 
-    // Получаем текущего пользователя для ответа
     const currentUser = await User.findById(req.user.id);
 
-    // Реальное время: уведомляем обе стороны чтоб они перезагрузили список друзей
+    // Real-time: получателю прилетает новый pending-запрос
     const io = req.app.get('io');
     if (io) {
-      io.to(`user:${friend._id}`).emit('friend-added', {
+      io.to(`user:${friend._id}`).emit('friend-request', {
+        id: friendship._id,
         from: {
           id: currentUser._id,
           name: currentUser.name,
           email: currentUser.email,
           color: currentUser.color,
-        },
-      });
-      io.to(`user:${req.user.id}`).emit('friend-added', {
-        from: {
-          id: friend._id,
-          name: friend.name,
-          email: friend.email,
-          color: friend.color,
         },
       });
     }
@@ -194,7 +186,7 @@ router.post('/invite', authMiddleware, async (req, res) => {
     ]).catch(() => {});
 
     res.status(201).json({
-      message: `${friend.name} добавлен в друзья!`,
+      message: `Запрос отправлен ${friend.name}`,
       friend: {
         id: friend._id,
         name: friend.name,
@@ -225,18 +217,32 @@ router.put('/:id/accept', authMiddleware, async (req, res) => {
     friendship.status = 'accepted';
     await friendship.save();
 
-    // Создаём уведомление инициатору
     await Notification.create({
       userId: friendship.requester,
       type: 'request_accepted',
       fromUser: req.user.id,
     });
 
-    // Badges для обеих сторон
     const io = req.app.get('io');
+
+    // Real-time: обе стороны перезагружают список друзей
+    const [me, requester] = await Promise.all([
+      User.findById(req.user.id),
+      User.findById(friendship.requester),
+    ]);
+    if (io && me && requester) {
+      io.to(`user:${friendship.requester}`).emit('friend-added', {
+        from: { id: me._id, name: me.name, email: me.email, color: me.color },
+      });
+      io.to(`user:${req.user.id}`).emit('friend-added', {
+        from: { id: requester._id, name: requester.name, email: requester.email, color: requester.color },
+      });
+    }
+
+    // Badges для обеих сторон
     Promise.all([
-      User.findById(req.user.id).then((u) => u && checkBadges(u, io)),
-      User.findById(friendship.requester).then((u) => u && checkBadges(u, io)),
+      me && checkBadges(me, io),
+      requester && checkBadges(requester, io),
     ]).catch(() => {});
 
     res.json({ message: 'Запрос принят' });
@@ -259,7 +265,16 @@ router.put('/:id/reject', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
+    const requesterId = friendship.requester.toString();
     await Friendship.findByIdAndDelete(req.params.id);
+
+    // Real-time: уведомляем инициатора что запрос отклонён (для синхронизации UI)
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${requesterId}`).emit('friend-request-rejected', {
+        byUserId: req.user.id,
+      });
+    }
 
     res.json({ message: 'Запрос отклонён' });
   } catch (error) {

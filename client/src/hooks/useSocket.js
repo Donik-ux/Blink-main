@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore.js';
 import { useLocationStore } from '../store/locationStore.js';
 import { useNotificationStore } from '../store/notifStore.js';
 import { useFriendStore } from '../store/friendStore.js';
+import { useCallStore } from '../store/callStore.js';
 import { getFriends } from '../api/friends.js';
 
 export const useSocket = () => {
@@ -17,6 +18,7 @@ export const useSocket = () => {
   const setFriends = useFriendStore((state) => state.setFriends);
   const removeFriendFromStore = useFriendStore((state) => state.removeFriend);
   const updateFriendPresence = useFriendStore((state) => state.updateFriendPresence);
+  const addRequest = useFriendStore((state) => state.addRequest);
 
   useEffect(() => {
     // Сокет должен подниматься сразу после refresh — достаточно токена, currentUser может ещё догружаться
@@ -102,6 +104,29 @@ export const useSocket = () => {
       updateFriendPresence(data.userId, { online: false, lastSeen: data.lastSeen || new Date() });
     });
 
+    // Входящий запрос в друзья — добавляем в список pending-запросов
+    socket.on('friend-request', (data) => {
+      if (!data?.id || !data?.from) return;
+      addRequest({ id: data.id, from: data.from });
+      addNotification({
+        id: Date.now(),
+        type: 'friend_request',
+        from: { id: data.from.id, name: data.from.name },
+        read: false,
+        createdAt: new Date(),
+      });
+      try {
+        if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('Новый запрос в друзья', {
+            body: `${data.from.name} хочет добавить тебя`,
+            icon: '/icon-192.png',
+            tag: `req-${data.id}`,
+          });
+        }
+      } catch { /* ignore */ }
+    });
+
     // Друга добавили — перезагружаем список, чтоб он сразу появился у обеих сторон
     socket.on('friend-added', async (data) => {
       try {
@@ -163,6 +188,21 @@ export const useSocket = () => {
       } catch {}
     });
 
+    // Входящий видеозвонок
+    socket.on('incoming-call', (data) => {
+      if (!data?.from?.id || !data?.offer) return;
+      // Если уже в звонке — игнорируем
+      if (useCallStore.getState().status !== 'idle') return;
+      useCallStore.getState().setIncoming({
+        peer: data.from,
+        offer: data.offer,
+        conversationId: data.conversationId || null,
+      });
+      try {
+        if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]);
+      } catch { /* ignore */ }
+    });
+
     socket.on('error', (error) => {
       console.error('Socket ошибка:', error);
     });
@@ -173,7 +213,7 @@ export const useSocket = () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token, updateFriendLocation, removeFriendLocation, addNotification, setFriends, removeFriendFromStore, updateFriendPresence]);
+  }, [token, updateFriendLocation, removeFriendLocation, addNotification, setFriends, removeFriendFromStore, updateFriendPresence, addRequest]);
 
   return {
     socket: socketRef.current,

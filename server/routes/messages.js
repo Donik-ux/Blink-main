@@ -344,6 +344,50 @@ router.post('/messages/:id/reaction', authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE удалить все сообщения из чата (очистка)
+router.delete('/conversations/:conversationId/messages', authenticateToken, async (req, res) => {
+  try {
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation) {
+      return res.status(404).json({ error: 'Чат не найден' });
+    }
+    if (!isParticipant(conversation, req.user.id)) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
+    await Message.deleteMany({ conversationId: req.params.conversationId });
+
+    conversation.lastMessage = '';
+    conversation.lastMessageTime = null;
+    conversation.lastMessageSenderId = null;
+    if (conversation.unreadCount instanceof Map) {
+      for (const p of conversation.participants) {
+        conversation.unreadCount.set(String(p?._id || p), 0);
+      }
+    }
+    await conversation.save();
+
+    // Уведомляем остальных участников, чтобы они перезагрузили сообщения
+    const io = req.app.get('io');
+    if (io) {
+      for (const p of conversation.participants) {
+        const pid = String(p?._id || p);
+        if (pid !== String(req.user.id)) {
+          io.to(`user:${pid}`).emit('chat-cleared', {
+            conversationId: req.params.conversationId,
+            byUserId: req.user.id,
+          });
+        }
+      }
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Ошибка очистки чата:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 // PUT отметить сообщения как прочитанные
 router.put('/conversations/:conversationId/read', authenticateToken, async (req, res) => {
   try {

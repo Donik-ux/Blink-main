@@ -53,3 +53,8 @@ export const deleteMessage = async (messageId) => {
   const response = await apiClient.delete(`/chat/messages/${messageId}`);
   return response.data;
 };
+
+export const clearConversation = async (conversationId) => {
+  const response = await apiClient.delete(`/chat/conversations/${conversationId}/messages`);
+  return response.data;
+};

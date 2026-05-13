@@ -14,6 +14,7 @@ export const BottomNav = () => {
     { path: '/map', icon: MapPin, label: t('nav_map') },
     { path: '/friends', icon: Users, label: t('nav_friends') },
     { path: '/chats', icon: MessageCircle, label: t('nav_chats') },
+    { path: '/steps', icon: Trophy, label: t('nav_steps') || 'Шаги' },
     { path: '/activity', icon: Bell, label: t('nav_activity'), notif: true },
     { path: '/profile', icon: User, label: t('nav_profile') },
   ];

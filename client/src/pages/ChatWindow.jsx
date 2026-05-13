@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { Send, ArrowLeft, RotateCcw, Smile, Mic, Trash2, Edit2, X, Check, Image as ImageIcon } from 'lucide-react';
+import { Send, ArrowLeft, RotateCcw, Smile, Mic, Trash2, Edit2, X, Check, Image as ImageIcon, Video } from 'lucide-react';
 import { compressImage } from '../utils/image.js';
 import {
   getMessages, sendMessage, markAsRead,
-  reactToMessage, editMessage, deleteMessage,
+  reactToMessage, editMessage, deleteMessage, clearConversation,
 } from '../api/chat.js';
 import { useAuthStore } from '../store/authStore.js';
 import { useSocket } from '../hooks/useSocket.js';
+import { useCallStore } from '../store/callStore.js';
 import { Avatar } from '../components/Avatar.jsx';
 import { Toast } from '../components/Toast.jsx';
 import { useT } from '../i18n/index.js';
@@ -187,11 +188,17 @@ export const ChatWindow = () => {
       setMessages((prev) =>
         prev.map((m) => {
           if (String(m.senderId?._id || m.senderId) !== String(myId)) return m;
-          const sb = reactionsList(m.seenBy); // re-use helper
+          const sb = reactionsList(m.seenBy);
           if (sb[data.seenBy]) return m;
           return { ...m, seenBy: { ...sb, [data.seenBy]: data.seenAt } };
         })
       );
+    };
+
+    const onChatCleared = (data) => {
+      if (data?.conversationId !== conversationId) return;
+      setMessages([]);
+      setToast({ message: 'Собеседник очистил чат', type: 'info' });
     };
 
     socket.on('receive-message', onReceive);
@@ -200,6 +207,7 @@ export const ChatWindow = () => {
     socket.on('message-edited', onEdited);
     socket.on('message-deleted', onDeleted);
     socket.on('messages-seen', onSeen);
+    socket.on('chat-cleared', onChatCleared);
 
     return () => {
       socket.off('receive-message', onReceive);
@@ -208,10 +216,39 @@ export const ChatWindow = () => {
       socket.off('message-edited', onEdited);
       socket.off('message-deleted', onDeleted);
       socket.off('messages-seen', onSeen);
+      socket.off('chat-cleared', onChatCleared);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (typingClearRef.current) clearTimeout(typingClearRef.current);
     };
   }, [conversationId, socket, myId]);
+
+  const handleStartCall = () => {
+    if (!friend) {
+      setToast({ message: 'Не удалось определить собеседника', type: 'error' });
+      return;
+    }
+    if (useCallStore.getState().status !== 'idle') return;
+    useCallStore.getState().startOutgoing(
+      {
+        id: friend.id || friend._id,
+        name: friend.name,
+        color: friend.color,
+        avatar: friend.avatar,
+      },
+      conversationId
+    );
+  };
+
+  const handleClearChat = async () => {
+    if (!window.confirm('Очистить всю переписку? Это действие нельзя отменить.')) return;
+    try {
+      await clearConversation(conversationId);
+      setMessages([]);
+      setToast({ message: 'Чат очищен', type: 'success' });
+    } catch (e) {
+      setToast({ message: 'Не удалось очистить чат', type: 'error' });
+    }
+  };
 
   const handleInputChange = (e) => {
     setNewMessage(e.target.value);
@@ -449,6 +486,28 @@ export const ChatWindow = () => {
               )}
             </div>
           </div>
+
+          {/* Действия в шапке: видеозвонок + очистка (только 1:1 чаты) */}
+          {friend && !isGroup && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={handleStartCall}
+                className="press w-10 h-10 flex items-center justify-center hover:bg-accent/15 text-accent rounded-xl transition-colors"
+                aria-label="Видеозвонок"
+                title="Видеозвонок"
+              >
+                <Video size={20} />
+              </button>
+              <button
+                onClick={handleClearChat}
+                className="press w-10 h-10 flex items-center justify-center hover:bg-red-500/15 text-white/60 hover:text-red-400 rounded-xl transition-colors"
+                aria-label="Очистить чат"
+                title="Очистить чат"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client -- --host\"",
+    "phone": "phone.bat",
     "install-all": "npm install --prefix server && npm install --prefix client",
     "build": "npm run build --prefix client",
     "bg:start": "pm2 start ecosystem.config.cjs && pm2 save",
